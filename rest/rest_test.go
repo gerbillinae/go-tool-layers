@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,5 +98,21 @@ func TestSiteGuards(t *testing.T) {
 	}
 	if again, _ := s.Start(0, ""); *again.URL != *st.URL {
 		t.Error("starting again returns the running site")
+	}
+}
+
+// TestSitePortInUse: a port that's taken is port_in_use, on every OS (Windows
+// reports it differently).
+func TestSitePortInUse(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	s := &Site{Handler: func(string, string) http.Handler { return http.NotFoundHandler() }}
+	_, err = s.Start(port, "")
+	if e := tool.AsError(err); err == nil || e.Code != CodePortInUse || !strings.Contains(e.Message, strconv.Itoa(port)) {
+		t.Fatalf("Start on a taken port = %v, want %s naming the port", err, CodePortInUse)
 	}
 }

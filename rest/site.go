@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"net"
 	"net/http"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gerbillinae/go-tool-layers/cli"
@@ -75,7 +73,7 @@ func (s *Site) Start(port int, token string) (Status, error) {
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
 	if err != nil {
-		if errors.Is(err, syscall.EADDRINUSE) {
+		if addrInUse(err) {
 			return Status{}, tool.Errorf(CodePortInUse, "port %d is already in use: pick another with --port, or leave it out for a free one", port)
 		}
 		return Status{}, tool.Errorf(tool.CodeInternal, "couldn't open a local port: %v", err)
