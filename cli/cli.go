@@ -138,7 +138,7 @@ func Command(r *tool.Registry, c *tool.Command) *cobra.Command {
 		cmd.Hidden = true
 		cmd.Short += " (needs " + missing + ")"
 	}
-	bound := Bind(cmd, in.Interface())
+	bound := Bind(cmd, in.Interface(), c.NoFlags...)
 	var yes bool
 	hasYes := slices.ContainsFunc(tool.Fields(c.In), func(f tool.Field) bool { return f.Tag.Get("yes") == "true" })
 	if hasYes {
@@ -182,12 +182,13 @@ type Binding struct {
 // Bind adds a flag for each field of the struct v points to that has a
 // `flag` tag, and returns them. The help is the field's jsonschema tag, the
 // same text MCP's schema shows, so the CLI and MCP can't drift apart.
-func Bind(cmd *cobra.Command, v any) []Binding {
+// Flags named in skip are left out.
+func Bind(cmd *cobra.Command, v any, skip ...string) []Binding {
 	rv := reflect.ValueOf(v).Elem()
 	var out []Binding
 	for _, f := range tool.Fields(rv.Type()) {
 		name := f.Tag.Get("flag")
-		if name == "" {
+		if name == "" || slices.Contains(skip, name) || (f.Interfaces != nil && !slices.Contains(f.Interfaces, tool.CLI)) {
 			continue
 		}
 		help := f.Tag.Get("jsonschema")

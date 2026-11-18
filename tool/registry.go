@@ -60,6 +60,12 @@ type Command struct {
 	// OwnChanges: the result reports the shared changes itself (a state
 	// snapshot), so interfaces don't add them.
 	OwnChanges bool
+	// NoFlags are input fields' flags the CLI leaves out for this command
+	// (an option shared with other commands that means nothing here).
+	NoFlags []string
+	// Optional are input fields this command doesn't require, though their
+	// type would (a shared options struct).
+	OptionalFields []string
 	In         reflect.Type
 	run        func(ctx context.Context, cx Context, in any) (any, error)
 }
@@ -87,6 +93,8 @@ func (c *Command) Requires(features ...string) *Command    { c.Required = featur
 func (c *Command) Errors(codes ...string) *Command         { c.Codes = append(c.Codes, codes...); return c }
 func (c *Command) HTTP(r *Route) *Command                  { c.Route = r; return c }
 func (c *Command) ReportsOwnChanges() *Command             { c.OwnChanges = true; return c }
+func (c *Command) NoFlag(flags ...string) *Command         { c.NoFlags = append(c.NoFlags, flags...); return c }
+func (c *Command) Optional(fields ...string) *Command      { c.OptionalFields = append(c.OptionalFields, fields...); return c }
 func (c *Command) Offered(i Interface) bool                { return c.Interfaces == nil || slices.Contains(c.Interfaces, i) }
 func (c *Command) interfaces() []Interface {
 	if c.Interfaces == nil {
@@ -183,6 +191,23 @@ func (r *Registry) Command(name string) *Command {
 // Schema is a command's input schema.
 func (r *Registry) Schema(name string) *jsonschema.Schema { return r.schemas[name] }
 
+// SchemaFor is a command's input schema as one interface sees it: without
+// the fields not offered there (the `interfaces` tag).
+func (r *Registry) SchemaFor(name string, i Interface) *jsonschema.Schema {
+	c, s := r.Command(name), r.schemas[name]
+	if c == nil || s == nil {
+		return s
+	}
+	out := s.CloneSchemas()
+	for _, f := range Fields(c.In) {
+		if f.Interfaces != nil && !slices.Contains(f.Interfaces, i) {
+			delete(out.Properties, f.Name)
+			out.Required = slices.DeleteFunc(out.Required, func(n string) bool { return n == f.Name })
+		}
+	}
+	return out
+}
+
 // Category is a code's category (internal if unregistered).
 func (r *Registry) Category(code string) Category {
 	if e, ok := r.errors[code]; ok {
@@ -268,7 +293,7 @@ func (r *Registry) Invoke(ctx context.Context, cx Context, name string, input js
 	if ok, missing := r.Available(c); !ok {
 		return nil, Errorf(CodeFeatureUnavailable, "{cmd:%s} isn't available here: it needs %s", name, missing)
 	}
-	in, err := Decode(c.In, input, iface)
+	in, err := Decode(c.In, input, iface, c.OptionalFields...)
 	if err != nil {
 		return nil, err
 	}
@@ -329,8 +354,8 @@ func Fields(t reflect.Type) []Field {
 // Decode reads input (a JSON object) into a new value of type t for an
 // interface, returning a pointer to it. Unknown arguments, arguments not
 // offered to the interface (the `interfaces:"mcp,rest"` tag) and missing
-// required ones (no omitempty) are refused.
-func Decode(t reflect.Type, input json.RawMessage, iface Interface) (any, error) {
+// required ones (no omitempty, unless named in optional) are refused.
+func Decode(t reflect.Type, input json.RawMessage, iface Interface, optional ...string) (any, error) {
 	if len(strings.TrimSpace(string(input))) == 0 || string(input) == "null" {
 		input = json.RawMessage("{}")
 	}
@@ -340,17 +365,26 @@ func Decode(t reflect.Type, input json.RawMessage, iface Interface) (any, error)
 	}
 	fields := Fields(t)
 	known := map[string]Field{}
+	var offered []string
 	for _, f := range fields {
 		known[f.Name] = f
+		if f.Interfaces == nil || slices.Contains(f.Interfaces, iface) {
+			offered = append(offered, f.Name)
+		}
 	}
+	slices.Sort(offered)
 	for k := range raw {
 		f, ok := known[k]
 		if !ok || (f.Interfaces != nil && !slices.Contains(f.Interfaces, iface)) {
-			return nil, Errorf(CodeInvalidArgument, "there's no argument {arg:%s}. Nothing was changed.", k)
+			takes := "it takes no arguments"
+			if len(offered) > 0 {
+				takes = "it takes " + strings.Join(offered, ", ")
+			}
+			return nil, Errorf(CodeInvalidArgument, "there's no argument {arg:%s}: %s. Nothing was changed.", k, takes)
 		}
 	}
 	for _, f := range fields {
-		if _, given := raw[f.Name]; f.Required && !given && (f.Interfaces == nil || slices.Contains(f.Interfaces, iface)) {
+		if _, given := raw[f.Name]; f.Required && !given && !slices.Contains(optional, f.Name) && (f.Interfaces == nil || slices.Contains(f.Interfaces, iface)) {
 			return nil, Errorf(CodeMissingArgument, "{arg:%s} is required. Nothing was changed.", f.Name)
 		}
 	}

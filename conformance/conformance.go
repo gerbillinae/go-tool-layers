@@ -279,3 +279,36 @@ func DropKeys(keys ...string) func(map[string]any) {
 	}
 	return func(m map[string]any) { walk(m) }
 }
+
+// MaskLocalPorts is a normalizer that replaces local ports in strings
+// (127.0.0.1:PORT) with PORT, for servers each side starts for itself.
+func MaskLocalPorts(m map[string]any) {
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch t := v.(type) {
+		case string:
+			return localPort.ReplaceAllString(t, "127.0.0.1:PORT")
+		case map[string]any:
+			for k, x := range t {
+				t[k] = walk(x)
+			}
+		case []any:
+			for i, x := range t {
+				t[i] = walk(x)
+			}
+		}
+		return v
+	}
+	walk(m)
+}
+
+var localPort = regexp.MustCompile(`127\.0\.0\.1:\d+`)
+
+// Normalizers combines normalizers.
+func Normalizers(fs ...func(map[string]any)) func(map[string]any) {
+	return func(m map[string]any) {
+		for _, f := range fs {
+			f(m)
+		}
+	}
+}

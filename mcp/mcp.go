@@ -51,7 +51,7 @@ func NewServer(o Options) *mcp.Server {
 		if desc == "" {
 			desc = strings.TrimSpace(c.Summary + " " + c.LongText)
 		}
-		server.AddTool(&mcp.Tool{Name: ToolName(c.Name), Description: tool.Render(desc, tool.MCP), InputSchema: r.Schema(c.Name)}, handler(r, c, rep))
+		server.AddTool(&mcp.Tool{Name: ToolName(c.Name), Description: tool.Render(desc, tool.MCP), InputSchema: r.SchemaFor(c.Name, tool.MCP)}, handler(r, c, rep))
 	}
 	return server
 }
